@@ -66,7 +66,10 @@ Based on the posterior mean of the intercept parameters, the Manhattan Bridge wa
 ### Installation
 1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone <[https://github.com/lynscrat/Bayesian-Analysis-of-NYC-East-River-Bridge-Bicycle-Traffic.git]>
 ```
 2. Open `NYC_Bicycle.Rmd` in RStudio.
-3. 
+3. Install required R packages:
+```bash
+install.packages(c("tidyverse", "rjags", "e1071", "corrplot", "coda", "brms", "Rcpp"))
+```
