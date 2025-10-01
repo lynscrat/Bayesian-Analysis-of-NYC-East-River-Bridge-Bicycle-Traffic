@@ -1,0 +1,582 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-12-09"
+---
+
+```{r}
+library(tidyverse)
+library(rjags)
+library(e1071)
+```
+
+```{r}
+df <- read.csv("data.csv", header = TRUE)
+```
+
+# Data Exploration : 
+
+```{r}
+head(df)
+```
+Date dan Day sama mangkannya dihapus
+
+```{r}
+df <- df[c(3,4,5,6,7,8,9,10,11)] #Subset column
+```
+
+```{r}
+str(df)
+```
+ada 9 column dengan 2 kolom char dan 7 kolom numerik. Tujuan kita adalah ingin memprediksi berapa total bicyclist yang melewati jembatan jembatan di new york city bagian timur berdasarkan temperature dan precipitation 
+
+```{r}
+#check precipitation karena harusnya numerik tapi terdeteksi character
+
+df[is.na(as.numeric(as.character(df$Precipitation))), ]
+```
+dapat dilihat bahwa terdapat duplikasi oleh karena itu row duplikasi harus di drop telebih dahulu berdasarkan tanggalnya karena tanggal seharusnya unique dari 1-30, kalau drop berdasarkan kolom lainnya maka dapat menghilangkan nilai lainnya
+
+```{r}
+df[duplicated(df$Day), ]
+```
+liat kolom duplikatnya ap aja
+
+```{r}
+df_unique <- df[!duplicated(df$Day), ]
+```
+
+hapus baris duplikat
+
+```{r}
+str(df_unique)
+```
+
+```{r}
+df_unique$Day <- strftime(df_unique$Day, '%u')
+```
+
+ubah ke hari jadi senin = 1, selasa = 2, dst..
+
+```{r}
+df_unique$Day <- as.numeric(df_unique$Day)
+```
+
+```{r}
+str(df_unique)
+```
+
+```{r}
+df_unique[is.na(as.numeric(as.character(df_unique$Precipitation))), ]
+```
+
+```{r}
+df_unique$Precipitation[df_unique$Precipitation == "0.47 (S)"] <- "0.47"
+df_unique$Precipitation[df_unique$Precipitation == "T"] <- "1"
+```
+
+```{r}
+df_unique$Precipitation <- as.numeric(df_unique$Precipitation)
+```
+
+handle precipitation column dan ubahnya ke numeric
+
+```{r}
+str(df_unique)
+```
+
+```{r}
+names(df_unique)[c(2,3)] <- c('High_Temp_F', 'Low_Temp_F') #ubah nama kolom agar lbh gmpng
+```
+
+```{r}
+summary(df_unique)
+```
+
+## Univariate Analysis
+
+```{r}
+for (col in colnames(df_unique)) {
+  cat("Kolom:", col, "\n")
+  
+  # Uji Shapiro-Wilk untuk normalitas
+  shapiro_result <- shapiro.test(df_unique[[col]])
+  cat("Shapiro-Wilk Test: W = ", shapiro_result$statistic, ", p-value = ", shapiro_result$p.value, "\n")
+  
+  # Menghitung skewness dan kurtosis
+  skewness_result <- skewness(df_unique[[col]])
+  kurtosis_result <- kurtosis(df_unique[[col]])
+  
+  # Menampilkan skewness dan kurtosis
+  cat("Skewness: ", skewness_result, "\n")
+  cat("Kurtosis: ", kurtosis_result, "\n\n")
+}
+```
+
+ketika p-value > 0.05 maka normal, jadi kolom yang normal adalah semuanya kecuali kolom day dan precipitation
+
+```{r}
+for (col in colnames(df_unique)) {
+  boxplot(df_unique[[col]], main = col, 
+          ylab = "Values", col = "lightblue")
+}
+```
+Berdasarkan boxplot kolom precipitation dan low temperature ada outlier
+
+```{r}
+Q1 <- quantile(df_unique$Precipitation, 0.25)
+Q3 <- quantile(df_unique$Precipitation, 0.75)
+IQR_value <- Q3 - Q1
+
+lower_bound <- Q1 - 1.5 * IQR_value
+upper_bound <- Q3 + 1.5 * IQR_value
+
+outliers <- df_unique[df_unique$Precipitation < lower_bound | df_unique$Precipitation > upper_bound, ]
+
+outliers
+```
+
+```{r}
+q1 <- quantile(df_unique$Low_Temp_F, 0.25)
+q3 <- quantile(df_unique$Low_Temp_F, 0.75)
+iqr_value <- q3 - q1
+
+lb <- q1 - 1.5 * iqr_value
+ub <- q3 + 1.5 * iqr_value
+
+outliers2 <- df_unique[df_unique$Low_Temp_F < lb | df_unique$Low_Temp_F > ub, ]
+
+outliers2
+```
+### Handle Outlier
+
+```{r}
+# Terapkan Winsorization
+df_unique$Precipitation <- ifelse(df_unique$Precipitation < lower_bound, lower_bound,
+                 ifelse(df_unique$Precipitation > upper_bound, upper_bound, df_unique$Precipitation))
+
+
+df_unique$Low_Temp_F <- ifelse(df_unique$Low_Temp_F < lb, lb,
+                 ifelse(df_unique$Low_Temp_F > ub, ub, df_unique$Low_Temp_F))
+```
+
+pakai winsorization untuk handle outlier
+
+```{r}
+for (col in colnames(df_unique)) {
+  boxplot(df_unique[[col]], main = col, 
+          ylab = "Values", col = "lightblue")
+}
+```
+## Bivariate Analysis
+
+```{r}
+library(corrplot)
+
+corr_matrix <- cor(df_unique, method = "pearson")
+
+corrplot(corr_matrix, method = "color", type = "upper",
+         addgrid.col = "gray",
+         tl.col = "black", tl.cex = 0.8)
+```
+
+Dapat dilihat variable temperatrue baik itu low dan high punya korelasi dengan prediksi variablenya yaitu total bicyclist, lalu dapat dilihat tidak ada multikolinearitas
+
+## Normalisasi/Stadardisasi
+
+```{r}
+for (i in 1:4) {  
+  max_target <- max(df_unique[[i]], na.rm = TRUE) 
+  min_target <- min(df_unique[[i]], na.rm = TRUE)  
+  
+  # Normalisasi kolom
+  df_unique[[i]] <- (df_unique[[i]] - min_target) / (max_target - min_target)
+}
+
+```
+
+# Modelling : 
+
+```{r}
+
+# JAGS data list
+jags_data <- list(
+  X = as.matrix(df_unique[, c("Day", "High_Temp_F", "Low_Temp_F", "Precipitation")]),
+  brooklynBridge = df_unique$Brooklyn.Bridge,
+  manhattanBridge = df_unique$Manhattan.Bridge,
+  williamsburgBridge = df_unique$Williamsburg.Bridge,
+  queensboroBridge = df_unique$Queensboro.Bridge,
+  total = df_unique$Total,
+  n = nrow(df_unique),
+  k = 4  
+)
+
+
+model_string <- "
+model {
+  for (i in 1:n) {
+    # Likelihood untuk masing-masing respons
+    total[i] ~ dpois(lambda_total[i])
+    brooklynBridge[i] ~ dpois(lambda_brooklyn[i])
+    manhattanBridge[i] ~ dpois(lambda_manhattan[i])
+    williamsburgBridge[i] ~ dpois(lambda_williamsburg[i])
+    queensboroBridge[i] ~ dpois(lambda_queens[i])
+    
+    # Linear predictor untuk masing-masing respons
+    log(lambda_total[i]) <- beta0_total + inprod(beta_total[], X[i, ])
+    log(lambda_brooklyn[i]) <- beta0_brooklyn + inprod(beta_brooklyn[], X[i, ])
+    log(lambda_manhattan[i]) <- beta0_manhattan + inprod(beta_manhattan[], X[i, ])
+    log(lambda_williamsburg[i]) <- beta0_williamsburg + inprod(beta_williamsburg[], X[i, ])
+    log(lambda_queens[i]) <- beta0_queens + inprod(beta_queens[], X[i, ])
+  }
+
+  # Priors untuk intercepts
+  beta0_total ~ dnorm(0, 0.001)
+  beta0_brooklyn ~ dnorm(0, 0.001)
+  beta0_manhattan ~ dnorm(0, 0.001)
+  beta0_williamsburg ~ dnorm(0, 0.001)
+  beta0_queens ~ dnorm(0, 0.001)
+
+  # Priors untuk coefficients
+  for (j in 1:k) {
+    beta_total[j] ~ dnorm(0, 0.001)
+    beta_brooklyn[j] ~ dnorm(0, 0.001)
+    beta_manhattan[j] ~ dnorm(0, 0.001)
+    beta_williamsburg[j] ~ dnorm(0, 0.001)
+    beta_queens[j] ~ dnorm(0, 0.001)
+  }
+}
+"
+
+model <- jags.model(textConnection(model_string), data = jags_data, n.chains = 3, n.adapt = 1000)
+
+# Burn-in
+update(model, 1000)
+
+# Sample from the posterior
+samples <- coda.samples(model, variable.names = c(
+  "beta0_total", "beta0_brooklyn", "beta0_manhattan", "beta0_williamsburg", "beta0_queens",
+  "beta_total[1]", "beta_total[2]", "beta_total[3]", "beta_total[4]",
+  "beta_brooklyn[1]", "beta_brooklyn[2]", "beta_brooklyn[3]", "beta_brooklyn[4]",
+  "beta_manhattan[1]", "beta_manhattan[2]", "beta_manhattan[3]", "beta_manhattan[4]",
+  "beta_williamsburg[1]", "beta_williamsburg[2]", "beta_williamsburg[3]", "beta_williamsburg[4]",
+  "beta_queens[1]", "beta_queens[2]", "beta_queens[3]", "beta_queens[4]"
+)
+, n.iter = 1000)
+
+# Summarize results
+summary(samples)
+
+par(mar = c(4, 4, 1, 1))
+plot(samples)
+
+```
+Berdasarkan analisis parameter seperti mean, SD, quantiles, dan SE, model tampaknya sudah cukup konvergen. Berdasarkan nilai rata-rata parameter Manhattan Bridge memiliki nilai yang cukup tinggi, dimana ini artinya Manhattan Bridge paling banyak dilewati oleh pesepeda pada tahun 2016 bulan 4
+
+# Evaluating Bayesian Regression
+
+### Initial Value (MLE)
+
+```{r}
+# Model regresi Poisson untuk total
+fit_total <- glm(Total ~ Day + High_Temp_F + Low_Temp_F + Precipitation, 
+                 family = poisson, data = df_unique)
+
+# Model regresi Poisson untuk Brooklyn Bridge
+fit_brooklyn <- glm(Brooklyn.Bridge ~ Day + High_Temp_F + Low_Temp_F + Precipitation, 
+                    family = poisson, data = df_unique)
+
+# Model regresi Poisson untuk Manhattan Bridge
+fit_manhattan <- glm(Manhattan.Bridge ~ Day + High_Temp_F + Low_Temp_F + Precipitation, 
+                     family = poisson, data = df_unique)
+
+# Model regresi Poisson untuk Williamsburg Bridge
+fit_williamsburg <- glm(Williamsburg.Bridge ~ Day + High_Temp_F + Low_Temp_F + Precipitation, 
+                        family = poisson, data = df_unique)
+
+# Model regresi Poisson untuk Queensboro Bridge
+fit_queens <- glm(Queensboro.Bridge ~ Day + High_Temp_F + Low_Temp_F + Precipitation, 
+                  family = poisson, data = df_unique)
+
+# Ambil koefisien dari masing-masing model sebagai MLE
+mle_total <- coef(fit_total)
+mle_brooklyn <- coef(fit_brooklyn)
+mle_manhattan <- coef(fit_manhattan)
+mle_williamsburg <- coef(fit_williamsburg)
+mle_queens <- coef(fit_queens)
+
+
+initial_values <- list(
+  beta0_total = mle_total["(Intercept)"],  # Intercept untuk total
+  beta_total = mle_total[c("Day", "High_Temp_F", "Low_Temp_F", "Precipitation")],  # Koefisien untuk total
+  
+  beta0_brooklyn = mle_brooklyn["(Intercept)"],  # Intercept untuk Brooklyn Bridge
+  beta_brooklyn = mle_brooklyn[c("Day", "High_Temp_F", "Low_Temp_F", "Precipitation")],  # Koefisien untuk Brooklyn Bridge
+  
+  beta0_manhattan = mle_manhattan["(Intercept)"],  # Intercept untuk Manhattan Bridge
+  beta_manhattan = mle_manhattan[c("Day", "High_Temp_F", "Low_Temp_F", "Precipitation")],  # Koefisien untuk Manhattan Bridge
+  
+  beta0_williamsburg = mle_williamsburg["(Intercept)"],  # Intercept untuk Williamsburg Bridge
+  beta_williamsburg = mle_williamsburg[c("Day", "High_Temp_F", "Low_Temp_F", "Precipitation")],  # Koefisien untuk Williamsburg Bridge
+  
+  beta0_queens = mle_queens["(Intercept)"],  # Intercept untuk Queensboro Bridge
+  beta_queens = mle_queens[c("Day", "High_Temp_F", "Low_Temp_F", "Precipitation")]  # Koefisien untuk Queensboro Bridge
+)
+
+# Inisialisasi model JAGS
+model2 <- jags.model(textConnection(model_string), 
+                     data = jags_data, 
+                     n.chains = 3, 
+                     inits = list(initial_values, initial_values, initial_values))
+
+update(model2, 1000)  # Burn-in
+
+# Sample dari posterior
+samples2 <- coda.samples(model2, variable.names = c(
+  "beta0_total", "beta0_brooklyn", "beta0_manhattan", "beta0_williamsburg", "beta0_queens",
+  "beta_total", "beta_brooklyn", "beta_manhattan", "beta_williamsburg", "beta_queens"
+), n.iter = 1000)
+
+summary(samples2)
+
+par(mar = c(4, 4, 1, 1))
+plot(samples2)
+
+```
+
+### Check Convergence 
+
+##### Gewke Diagnostics 
+
+```{r}
+library(coda)
+
+geweke_results <- geweke.diag(samples2)
+geweke_results
+```
+##### Gelman - Rubin
+```{r}
+gelman_diag <- gelman.diag(samples2, multivariate = TRUE)
+gelman_diag
+```
+
+### Check Autocorrelation 
+
+```{r}
+autocorr.diag(samples2)
+```
+
+### Choosing Effective Sample Size
+
+#### ESS
+
+```{r}
+ess <- effectiveSize(samples2)
+ess
+```
+##### Standard Error of Posterior Mean
+
+```{r}
+# Mendapatkan ringkasan dari hasil sampel posterior
+summary_samples <- summary(samples2)
+
+# Menampilkan SEPM untuk setiap parameter
+SEPM <- summary_samples$statistics[, "SD"]  
+SEPM
+```
+
+# Model Comparisons 
+
+### Bayes Factors 
+
+```{r}
+
+# Model regresi Poisson tanpa interaksi
+fit_total <- glm(Total ~ Day + High_Temp_F + Low_Temp_F + Precipitation,
+                 family = poisson, data = df_unique)
+
+# Ambil koefisien dari model untuk inisialisasi
+mle_total <- coef(fit_total)
+
+# Initial values
+initial_values <- list(
+  beta0_total = mle_total["(Intercept)"],
+  beta_total = mle_total[c("Day", "High_Temp_F", "Low_Temp_F", "Precipitation")]
+)
+
+# Model string JAGS (tanpa interaksi)
+model_string <- "
+model {
+  # Deklarasi parameter yang akan diestimasi
+  beta0_total ~ dnorm(0, 0.001)  # Prior untuk intercept
+  for (j in 1:4) {
+    beta_total[j] ~ dnorm(0, 0.001)  # Prior untuk koefisien
+  }
+  
+  for (i in 1:N) {
+    Total[i] ~ dpois(lambda[i])  # Model Poisson
+    lambda[i] <- exp(beta0_total + beta_total[1]*Day[i] + beta_total[2]*High_Temp_F[i] + beta_total[3]*Low_Temp_F[i] + beta_total[4]*Precipitation[i])
+  }
+}
+"
+
+# Menyiapkan data untuk JAGS
+jags_data <- list(
+  Total = df_unique$Total,
+  Day = df_unique$Day,
+  High_Temp_F = df_unique$High_Temp_F,
+  Low_Temp_F = df_unique$Low_Temp_F,
+  Precipitation = df_unique$Precipitation,
+  N = nrow(df_unique)
+)
+
+# Inisialisasi model JAGS
+model_total <- jags.model(textConnection(model_string),
+                          data = jags_data,
+                          n.chains = 3,
+                          inits = list(initial_values, initial_values, initial_values))
+
+update(model_total, 1000)  # Burn-in
+
+# Sampling dari posterior
+samples_total <- coda.samples(model_total, variable.names = c("beta0_total", "beta_total"),
+                              n.iter = 1000)
+
+# Summary hasil sampling
+summary(samples_total)
+
+
+```
+
+
+```{r}
+# Model regresi Poisson dengan interaksi
+fit_interaction_total <- glm(Total ~ Day + High_Temp_F * Precipitation + Low_Temp_F + Precipitation, 
+                             family = poisson, data = df_unique)
+
+# Ambil koefisien dari model untuk inisialisasi
+mle_interaction_total <- coef(fit_interaction_total)
+
+# Initial values
+initial_values_interaction <- list(
+  beta0_total = mle_interaction_total["(Intercept)"],
+  beta_total = mle_interaction_total[c("Day", "High_Temp_F", "Low_Temp_F", "Precipitation", "High_Temp_F:Precipitation")]
+)
+
+# Model string JAGS (dengan interaksi)
+model_string_interaction <- "
+model {
+  beta0_total ~ dnorm(0, 0.001)  # Prior untuk intercept
+  for (j in 1:5) {  # Mengubah ukuran untuk beta_total, ada 5 parameter
+    beta_total[j] ~ dnorm(0, 0.001)  # Prior untuk koefisien
+  }
+  
+  for (i in 1:N) {
+    Total[i] ~ dpois(lambda[i])
+    lambda[i] <- exp(beta0_total + beta_total[1]*Day[i] + beta_total[2]*High_Temp_F[i] + beta_total[3]*Low_Temp_F[i] + beta_total[4]*Precipitation[i] + beta_total[5]*High_Temp_F[i]*Precipitation[i])
+  }
+}
+"
+
+# Menyiapkan data untuk JAGS
+jags_data_interaction <- list(
+  Total = df_unique$Total,
+  Day = df_unique$Day,
+  High_Temp_F = df_unique$High_Temp_F,
+  Low_Temp_F = df_unique$Low_Temp_F,
+  Precipitation = df_unique$Precipitation,
+  N = nrow(df_unique)
+)
+
+# Inisialisasi model JAGS
+model_interaction_total <- jags.model(textConnection(model_string_interaction),
+                                      data = jags_data_interaction,
+                                      n.chains = 3,
+                                      inits = list(initial_values_interaction, initial_values_interaction, initial_values_interaction))
+
+update(model_interaction_total, 1000)  # Burn-in
+
+# Sampling dari posterior
+samples_interaction_total <- coda.samples(model_interaction_total, variable.names = c("beta0_total", "beta_total"),
+                                          n.iter = 1000)
+
+# Summary hasil sampling
+summary(samples_interaction_total)
+
+
+```
+
+
+```{r}
+library(Rcpp)
+library(brms)
+
+# Fit model dengan dan tanpa interaksi
+fit_total_brms <- brm(Total ~ Day + High_Temp_F + Low_Temp_F + Precipitation, 
+                      family = poisson(), data = df_unique)
+
+fit_interaction_brms <- brm(Total ~ Day + High_Temp_F * Precipitation + Low_Temp_F + Precipitation,
+                             family = poisson(), data = df_unique)
+
+# Bandingkan kedua model menggunakan Bayes Factor
+bayes_factor(fit_interaction_brms, fit_total_brms)
+
+```
+
+### DIC 
+
+```{r}
+dic_result <- dic.samples(model_interaction_total, n.iter = 1000)
+
+dic_result
+```
+
+# Posterior Predictive Check
+
+### Bayesian p-Value
+
+```{r}
+posterior_predictive <- function(posterior_samples, data) {
+  N <- nrow(data)
+  pred <- matrix(NA, nrow = nrow(posterior_samples), ncol = N)
+  
+  for (i in 1:nrow(posterior_samples)) {
+    # Ambil koefisien dari posterior samples dengan nama yang benar
+    beta0 <- posterior_samples[i, "beta0_total"]
+    beta_day <- posterior_samples[i, "beta_total[1]"]        # Day
+    beta_high_temp <- posterior_samples[i, "beta_total[2]"]  # High_Temp_F
+    beta_low_temp <- posterior_samples[i, "beta_total[3]"]   # Low_Temp_F
+    beta_precipitation <- posterior_samples[i, "beta_total[4]"]  # Precipitation
+    
+    # Hitung log-lambda (log dari parameter Poisson)
+    log_lambda <- beta0 + beta_day * data$Day + 
+                  beta_high_temp * data$High_Temp_F +
+                  beta_low_temp * data$Low_Temp_F + 
+                  beta_precipitation * data$Precipitation
+    
+    # Menggunakan distribusi Poisson untuk menghasilkan prediksi
+    pred[i, ] <- rpois(N, exp(log_lambda))
+  }
+  
+  return(pred)
+}
+
+# Menghasilkan prediksi posterior untuk data yang diamati
+samples2_as_matrix <- as.matrix(samples2) 
+
+predictions <- posterior_predictive(samples2_as_matrix, df_unique)
+
+# Statistik yang diamati (jumlah kejadian yang diamati)
+observed_total <- sum(df_unique$Total)
+
+# Statistik yang dihitung dari prediksi posterior (jumlah kejadian yang diprediksi)
+predicted_totals <- rowSums(predictions)
+
+# Hitung p-value Bayesian
+p_value <- mean(predicted_totals >= observed_total)
+
+p_value
+```
+
+
+
