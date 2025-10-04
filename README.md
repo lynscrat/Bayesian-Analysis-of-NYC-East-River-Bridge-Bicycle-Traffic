@@ -1,7 +1,7 @@
 # Bayesian-Analysis-of-NYC-East-River-Bridge-Bicycle-Traffic
 This project performs a Bayesian analysis to predict the number of bicyclists crossing the East River bridges in New York City based on weather conditions and the day of the week. The analysis uses data from April 2016 and builds a multivariate Poisson regression model using JAGS (Just Another Gibbs Sampler).
 
-### 📈 Project Overview
+### Project Overview
 The primary goal is to understand the factors influencing bicycle traffic across four major NYC bridges: Brooklyn, Manhattan, Williamsburg, and Queensboro. We aim to predict the total number of cyclists as well as the count for each individual bridge using a Bayesian framework.
 
 The analysis pipeline includes:
@@ -12,11 +12,11 @@ The analysis pipeline includes:
 - **Model Comparison**: Comparing a simple model against one with interaction terms using Bayes Factors and DIC.
 - **Posterior Predictive Checks**: Validating the model's fit to the data.
 
-### 💾 Dataset
+### Dataset
 The data for this analysis is sourced from the New York City Department of Transportation's daily monitoring program 🚲. This program tracks bicycle traffic across the East River bridges to measure bike utilization, which is a key input for transportation planning. 
 The dataset, `data.csv`, provides a daily record of the number of cyclists crossing into or out of Manhattan for the month of April 2016. It includes the bicycle counts for each bridge along with key weather information for that day.
 
-📂 Resource: [Kaggle – New York City Bicycle Crossing](https://www.kaggle.com/datasets/new-york-city/nyc-east-river-bicycle-crossings?), which contains daily records for April 2016.
+**Resource**: [Kaggle – New York City Bicycle Crossing](https://www.kaggle.com/datasets/new-york-city/nyc-east-river-bicycle-crossings?), which contains daily records for April 2016.
 
 ##### Predictor Variables:
 - `Day`: Day of the week (numeric, where Monday=1, Sunday=7).
@@ -53,12 +53,12 @@ The models were compared using:
 ### Posterior Predictive Check
 A Bayesian p-value was calculated by comparing the distribution of a test statistic (total cyclist count) generated from the posterior predictive distribution with the observed statistic. This check helps validate whether the model provides a good fit for the observed data.
 
-### 📋 Results
+### Results
 The Bayesian regression model successfully converged and produced stable posterior distributions for all parameters.
 Temperature was confirmed to be a significant positive predictor of cyclist traffic.
 Based on the posterior mean of the intercept parameters, the Manhattan Bridge was identified as the most frequently used bridge by cyclists during this period.
 
-### 🚀 How to Run the Code
+### How to Run the Code
 #### Prerequisites
 - **R** and **RStudio**  
 - **JAGS** (Just Another Gibbs Sampler) – [Download here](https://mcmc-jags.sourceforge.io/)
